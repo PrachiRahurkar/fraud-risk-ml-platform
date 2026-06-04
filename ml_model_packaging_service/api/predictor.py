@@ -52,6 +52,11 @@ class EnsemblePredictor:
 
     def _to_feature_matrix(self, records: list[dict]) -> np.ndarray:
         df = pd.DataFrame(records)
+        # Derive length features from text when not explicitly provided
+        if "descr_len" not in df.columns or df["descr_len"].isna().all():
+            df["descr_len"] = df.get("description", pd.Series([""] * len(df))).fillna("").str.len().astype(float)
+        if "title_len" not in df.columns or df["title_len"].isna().all():
+            df["title_len"] = df.get("title", pd.Series([""] * len(df))).fillna("").str.len().astype(float)
         df, self._num_imp, self._phone_enc = preprocess(
             df, self._num_imp, self._phone_enc, fit=(self._num_imp is None)
         )
