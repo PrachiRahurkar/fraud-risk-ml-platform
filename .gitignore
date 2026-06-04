@@ -32,3 +32,6 @@ ml_model_packaging_service/frontend/dist/
 
 # OS
 .DS_Store
+
+# Claude Code workspace
+.claude/

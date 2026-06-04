@@ -17,7 +17,7 @@ ray[train]==2.20.0
 
 # LoRA / LLM fine-tuning
 transformers==4.40.2
-peft==0.11.1
+peft==0.19.1
 accelerate==0.30.1
 torch==2.3.0
 datasets==2.19.1
