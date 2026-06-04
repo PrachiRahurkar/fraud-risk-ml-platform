@@ -1,0 +1,37 @@
+# Data & streaming
+pyspark==3.5.1
+kafka-python==2.0.2
+pyarrow==14.0.2
+pandas==2.2.2
+beautifulsoup4==4.12.3
+lxml==5.2.1
+
+# Feature engineering & ML
+scikit-learn==1.4.2
+xgboost==2.0.3
+# lightgbm requires libomp on macOS: brew install libomp, then: pip install lightgbm
+optuna==3.6.1
+
+# Distributed training
+ray[train]==2.20.0
+
+# LoRA / LLM fine-tuning
+transformers==4.40.2
+peft==0.11.1
+accelerate==0.30.1
+torch==2.3.0
+datasets==2.19.1
+evaluate==0.4.2
+
+# Experiment tracking
+setuptools<81
+mlflow==2.13.0
+
+# GCP storage
+google-cloud-storage==2.16.0
+
+# Utilities
+pydantic==2.7.1
+python-dotenv==1.0.1
+tqdm==4.66.4
+numpy==1.26.4

@@ -1,0 +1,31 @@
+base_model: google/gemma-2b
+task_type: SEQ_CLS
+num_labels: 2
+
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.1
+  target_modules:
+    - q_proj
+    - v_proj
+  bias: none
+
+training:
+  learning_rate: 2.0e-4
+  num_epochs: 10
+  batch_size: 8
+  max_length: 512
+  fp16: true
+  evaluation_strategy: epoch
+  save_strategy: epoch
+  load_best_model_at_end: true
+  metric_for_best_model: auc_roc
+
+mlflow:
+  tracking_uri: http://localhost:5001
+  experiment_name: fraud-lora
+
+output:
+  adapter_dir: models/lora-adapter
+  gcs_path: gs://fraud-risk-models/lora-adapters/v1

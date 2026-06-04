@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package monitoring;
+
+service MonitoringService {
+  rpc GetDriftReport (DriftRequest) returns (DriftReport);
+  rpc GetRollingMetrics (MetricsRequest) returns (RollingMetrics);
+}
+
+message DriftRequest {
+  string reference_split = 1;   // e.g. "train"
+  string current_split = 2;     // e.g. "recent_inference"
+}
+
+message DriftReport {
+  bool drift_detected = 1;
+  repeated string drifted_features = 2;
+  float share_of_drifted_features = 3;
+  string generated_at = 4;
+}
+
+message MetricsRequest {
+  string window = 1;   // e.g. "7d", "24h"
+}
+
+message RollingMetrics {
+  float auc_roc = 1;
+  float pr_auc = 2;
+  float f1 = 3;
+  float precision_at_100 = 4;
+  float precision_at_500 = 5;
+  float rolling_auc = 6;
+  string window = 7;
+  string computed_at = 8;
+}

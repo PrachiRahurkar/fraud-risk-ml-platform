@@ -1,0 +1,19 @@
+# Drift detection
+evidently==0.4.30
+
+# gRPC server (1.62.x is the last series supporting protobuf 4.x, compatible with mlflow<5)
+grpcio==1.62.2
+grpcio-tools==1.62.2
+protobuf>=4.21.6,<5.0
+
+# Data
+pandas==2.2.2
+numpy==1.26.4
+pyarrow==14.0.2
+
+# GCP
+google-cloud-storage==2.16.0
+
+# Utilities
+pydantic==2.7.1
+python-dotenv==1.0.1

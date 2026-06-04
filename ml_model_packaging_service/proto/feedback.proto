@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package feedback;
+
+service FeedbackService {
+  rpc SubmitLabel (LabelRequest) returns (LabelResponse);
+  rpc ListPendingLabels (Empty) returns (stream LabelRecord);
+}
+
+message LabelRequest {
+  int64 fund_id = 1;
+  bool is_fraud = 2;
+  float confidence = 3;
+  string reviewer_id = 4;
+  string notes = 5;
+}
+
+message LabelResponse {
+  bool success = 1;
+  string message = 2;
+  string label_id = 3;
+}
+
+message LabelRecord {
+  string label_id = 1;
+  int64 fund_id = 2;
+  bool is_fraud = 3;
+  float confidence = 4;
+  string reviewer_id = 5;
+  string created_at = 6;
+}
+
+message Empty {}

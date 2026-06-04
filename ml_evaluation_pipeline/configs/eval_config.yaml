@@ -1,0 +1,23 @@
+data:
+  test_fraud_path: data/test_data/fraud_data_test.csv
+  test_fund_path: data/test_data/fund_data_test.csv
+
+models:
+  xgb_model_path: models/xgb_model.json
+  shap_store_path: models/shap_store.json
+  feature_importance_path: models/feature_importance.csv
+
+thresholds:
+  fraud_decision: 0.5        # overridden by Youden-J at eval time
+  bias_alert_auc_drop: 0.05  # flag slices with AUC gap > this
+
+slices:
+  - category_id
+  - primary_phone_checks__line_type
+
+mlflow:
+  tracking_uri: http://localhost:5001
+  experiment_name: fraud-evaluation
+
+output:
+  bias_report_dir: models/bias_reports

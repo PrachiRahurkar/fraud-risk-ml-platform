@@ -1,0 +1,12 @@
+name: fraud-risk
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - -r ml_training_service/requirements.txt
+      - -r ml_evaluation_pipeline/requirements.txt
+      - -r ml_model_packaging_service/requirements.txt
+      - -r ml_observability_monitoring/requirements.txt

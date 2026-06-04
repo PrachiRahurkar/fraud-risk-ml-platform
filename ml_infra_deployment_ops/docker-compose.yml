@@ -1,0 +1,96 @@
+services:
+  # ── Kafka + Zookeeper ────────────────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    depends_on: [zookeeper]
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+  # ── Apache Spark ─────────────────────────────────────────────────────────────
+  spark-master:
+    image: apache/spark:3.5.1
+    environment:
+      SPARK_MODE: master
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+
+  spark-worker:
+    image: apache/spark:3.5.1
+    depends_on: [spark-master]
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_MEMORY: 2G
+      SPARK_WORKER_CORES: 2
+
+  # ── MLflow ──────────────────────────────────────────────────────────────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.13.0
+    ports:
+      - "5001:5000"
+    volumes:
+      - ../mlruns:/mlruns
+    command: >
+      mlflow server
+      --backend-store-uri /mlruns/mlflow.db
+      --default-artifact-root /mlruns/artifacts
+      --host 0.0.0.0
+      --port 5000
+
+  # ── FastAPI ML API ───────────────────────────────────────────────────────────
+  ml-api:
+    build:
+      context: ..
+      dockerfile: ml_model_packaging_service/Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      XGB_MODEL_PATH: /models/xgb_model.json
+      SHAP_STORE_PATH: /models/shap_store.json
+      FRAUD_THRESHOLD: "0.5"
+      W_LORA: "0.0"
+    volumes:
+      - ../models:/models:ro
+    depends_on: [mlflow]
+
+  # ── Node.js GraphQL BFF ──────────────────────────────────────────────────────
+  bff:
+    build:
+      context: ../ml_model_packaging_service/bff
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      ML_API_URL: http://ml-api:8000
+      FEEDBACK_SVC_URL: monitoring-svc:50051
+      MONITORING_SVC_URL: monitoring-svc:50052
+    depends_on: [ml-api]
+
+  # ── gRPC Monitoring Service ──────────────────────────────────────────────────
+  monitoring-svc:
+    build:
+      context: ..
+      dockerfile: ml_observability_monitoring/Dockerfile
+    ports:
+      - "50052:50052"
+    environment:
+      REFERENCE_PATH: /data/train_data/fraud_data_train.csv
+      INFERENCE_LOG_PATH: /data/inference_logs/predictions.jsonl
+      FEEDBACK_LABEL_PATH: /data/feedback/labels.jsonl
+    volumes:
+      - ../data:/data:ro

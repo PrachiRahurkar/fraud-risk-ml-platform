@@ -1,0 +1,26 @@
+{
+  "name": "fraud-risk-bff",
+  "version": "1.0.0",
+  "description": "GraphQL BFF gateway for fraud risk ML platform",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@apollo/server": "^4.10.4",
+    "@grpc/grpc-js": "^1.10.9",
+    "@grpc/proto-loader": "^0.7.13",
+    "axios": "^1.7.2",
+    "express": "^4.19.2",
+    "graphql": "^16.8.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.12.12",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.4.5"
+  }
+}
