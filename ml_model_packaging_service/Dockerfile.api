@@ -9,4 +9,6 @@ COPY ml_training_service/ ./ml_training_service/
 COPY ml_evaluation_pipeline/ ./ml_evaluation_pipeline/
 COPY ml_model_packaging_service/api/ ./ml_model_packaging_service/api/
 
-CMD ["uvicorn", "ml_model_packaging_service.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 8000
+
+CMD ["sh", "-c", "uvicorn ml_model_packaging_service.api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

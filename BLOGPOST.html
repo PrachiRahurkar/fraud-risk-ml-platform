@@ -1,0 +1,652 @@
+<!-- =====================================================================
+     Fraud Risk Detection Platform — Technical Blogpost
+     Paste this into Blogger's HTML editor (not the visual editor).
+     ===================================================================== -->
+
+<style>
+  .fraud-risk-post {
+    background: #ffffff;
+    color: #1f2937;
+    padding: 24px;
+    line-height: 1.65;
+    box-sizing: border-box;
+  }
+
+  .fraud-risk-post h2,
+  .fraud-risk-post h3,
+  .fraud-risk-post p,
+  .fraud-risk-post li,
+  .fraud-risk-post td,
+  .fraud-risk-post th {
+    color: #1f2937;
+  }
+
+  .fraud-risk-post a {
+    color: #005ea8;
+  }
+
+  .fraud-risk-post code {
+    color: #111827;
+  }
+
+  .fraud-risk-post pre,
+  .fraud-risk-post pre code {
+    color: #d4d4d4;
+  }
+</style>
+
+<div class="fraud-risk-post" style="background:#ffffff;color:#1f2937;padding:24px;line-height:1.65;box-sizing:border-box;">
+
+<p>
+  Source code:
+  <a href="https://github.com/PrachiRahurkar/fraud-risk-ml-platform" target="_blank">
+    github.com/PrachiRahurkar/fraud-risk-ml-platform
+  </a>
+</p>
+
+<!-- ─── 1. WHAT IS IT ─────────────────────────────────────────────────── -->
+<h2>What Is It?</h2>
+
+<p>
+  The <strong>Fraud Risk Detection Platform</strong> is a full-stack, end-to-end machine learning
+  system that automatically flags fraudulent fundraising campaigns before they can harm donors.
+  Given a campaign's structured metadata and free-form text (title + description), the platform
+  produces a fraud probability score between 0 and 1, a binary decision label, and a human-readable
+  explanation of the top signals that drove the decision.
+</p>
+
+<p>
+  Under the hood the platform combines two complementary models in a late-fusion ensemble:
+</p>
+
+<ul>
+  <li>
+    <strong>XGBoost</strong> — trained on 12 tabular features capturing account-level and
+    identity-verification signals (goal amount, email domain age, phone line type, KYC score, etc.)
+  </li>
+  <li>
+    <strong>LoRA-fine-tuned Gemma-2B</strong> — a 2-billion-parameter language model fine-tuned on
+    campaign text to detect rhetorical patterns and linguistic markers common in fraudulent campaigns
+  </li>
+</ul>
+
+<p>
+  The two model scores are fused as a weighted average
+  (<code>fraud_score = 0.65 × xgb_score + 0.35 × lora_score</code>), with the weight optimised
+  on a held-out validation set. The full system spans a React dashboard, a GraphQL BFF, a FastAPI
+  serving layer, a Spark-based training pipeline, and an observability stack that continuously
+  monitors for model drift and triggers retraining when needed.
+</p>
+
+
+<!-- ─── 2. WHY ─────────────────────────────────────────────────────────── -->
+<h2>Why Build This?</h2>
+
+<p>
+  Fundraising fraud is uniquely difficult to catch because fraudsters invest effort in making
+  campaigns look legitimate — plausible goals, coherent stories, real-looking contact information.
+  A rule-based system can be gamed; a single-signal model leaves gaps. Three concrete problems
+  drove the architecture choices:
+</p>
+
+<ol>
+  <li>
+    <strong>Tabular signals alone miss textual manipulation.</strong> A fraudster can pass email and
+    phone checks while writing a fabricated or plagiarised campaign description. A language model
+    catches this; a gradient-boosted tree cannot.
+  </li>
+  <li>
+    <strong>Text alone misses account-level risk.</strong> An LLM cannot directly observe that an
+    account was created yesterday, uses a disposable email, or set an unusually large funding goal.
+    Structured features capture exactly these signals.
+  </li>
+  <li>
+    <strong>Reviewers need explanations.</strong> A black-box score is not actionable. Human reviewers
+    need to know <em>why</em> a campaign was flagged — which three features pushed the score over the
+    threshold — so they can make an informed decision and provide feedback that improves the model.
+  </li>
+</ol>
+
+<p>
+  Beyond the modelling problem, the platform needs to keep working reliably over time. Campaign
+  language and fraud tactics evolve; a model trained once will degrade silently without a
+  continuous monitoring loop. The observability and feedback components are therefore first-class
+  requirements, not afterthoughts.
+</p>
+
+
+<!-- ─── 3. HIGH-LEVEL ARCHITECTURE ────────────────────────────────────── -->
+<h2>High-Level Architecture</h2>
+
+<p>
+  The platform has four horizontal layers that map cleanly onto development concerns:
+</p>
+
+<ol>
+  <li>
+    <strong>User Interface</strong> — a React single-page application where fraud reviewers score
+    individual campaigns, work through a ranked fraud queue, inspect model metrics, and read SHAP
+    explanations. It communicates exclusively via GraphQL.
+  </li>
+  <li>
+    <strong>API Gateway (BFF)</strong> — a Node.js/Apollo GraphQL server that translates GraphQL
+    operations into REST calls to the ML API and gRPC calls to the Feedback and Monitoring
+    microservices. This layer shields the frontend from the internal service topology.
+  </li>
+  <li>
+    <strong>ML Serving API</strong> — a FastAPI service that owns inference. It loads the XGBoost
+    model at startup, lazily loads the LoRA adapter on first ensemble request, runs the ensemble,
+    and returns scores alongside pre-computed SHAP explanations.
+  </li>
+  <li>
+    <strong>Training &amp; Observability Pipeline</strong> — an offline pipeline that ingests raw
+    CSV data through Kafka and a Spark ETL job, trains both models (XGBoost locally via Ray,
+    Gemma-2B on a GCP T4 GPU), evaluates and logs everything to MLflow, and then continuously
+    monitors production inference logs for drift and performance degradation.
+  </li>
+</ol>
+
+<p>
+  All four layers run together in Docker Compose for local development, and the API, BFF, and
+  frontend each have their own Cloud Build configuration for GCP deployment.
+</p>
+
+
+<!-- ─── 4. SYSTEM DESIGN DIAGRAM ──────────────────────────────────────── -->
+<h2>System Design Diagram</h2>
+
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:20px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;">
+  ┌─────────────────────────────────────────────────────────────────────────────────┐
+  │                              TRAINING PIPELINE                                  │
+  │                                                                                 │
+  │  CSV Files ──► Kafka ──► Spark ETL ──► Feature Store (Parquet / GCS)           │
+  │                                              │                                  │
+  │                          ┌───────────────────┴──────────────────┐              │
+  │                          │                                       │              │
+  │                   XGBoost Trainer                       LoRA Trainer            │
+  │                   (Ray Train, local)                  (HuggingFace,             │
+  │                   Optuna 50-trial HPO                  GCP T4 GPU)              │
+  │                   5-fold stratified CV                200 balanced samples      │
+  │                          │                                       │              │
+  │                   xgb_model.json                        LoRA adapter            │
+  │                          │                            (GCS bucket)              │
+  │                          └───────────────┬───────────────────────┘              │
+  │                                          │                                      │
+  │                              Evaluation Pipeline                                │
+  │                              SHAP store (7.1 MB JSON)                          │
+  │                              Bias slices, AUC, PR-AUC, F1                      │
+  │                                          │                                      │
+  │                                       MLflow                                   │
+  └──────────────────────────────────────────┼──────────────────────────────────────┘
+                                             │ models + artifacts
+  ┌──────────────────────────────────────────▼──────────────────────────────────────┐
+  │                               INFERENCE PATH                                    │
+  │                                                                                 │
+  │  React Frontend ──► Apollo Client ──► GraphQL BFF (port 4000)                  │
+  │     (port 5173)         GraphQL              │                                  │
+  │                                              │ REST  /predict                   │
+  │                                     FastAPI ML API (port 8000)                 │
+  │                                              │                                  │
+  │                          ┌───────────────────┴───────────────────┐              │
+  │                          │                                        │              │
+  │                   XGBoost inference                    LoRA inference            │
+  │                   (always loaded)                    (lazy-loaded on             │
+  │                                                      first ensemble req)         │
+  │                          │                                        │              │
+  │                          └───────────────┬────────────────────────┘              │
+  │                                          │                                      │
+  │                              Weighted ensemble                                  │
+  │                           0.65 × xgb + 0.35 × lora                             │
+  │                                          │                                      │
+  │                              SHAP store lookup                                  │
+  │                              top-3 features + directions                        │
+  └──────────────────────────────────────────┼──────────────────────────────────────┘
+                                             │ response
+  ┌──────────────────────────────────────────▼──────────────────────────────────────┐
+  │                           OBSERVABILITY &amp; FEEDBACK LOOP                         │
+  │                                                                                 │
+  │  Inference logs (JSONL) ──► GCS ──► Evidently drift detection                  │
+  │                                         │                                      │
+  │                              KS test per feature                               │
+  │                              Alert if p &lt; 0.05                                 │
+  │                                         │                                      │
+  │  Human reviews ──► gRPC Feedback Svc ──► Kafka fraud-risk.labels               │
+  │                       (port 50051)           │                                  │
+  │                                    ≥ 100 new labels                            │
+  │                                         │                                      │
+  │                              Retraining trigger                                │
+  │                                                                                 │
+  │  gRPC Monitoring Svc (port 50052) ──► rolling AUC, precision@K                 │
+  │                              Alert if AUC drops &gt; 3%                           │
+  └─────────────────────────────────────────────────────────────────────────────────┘
+</pre>
+
+
+<!-- ─── 5. COMPONENTS ──────────────────────────────────────────────────── -->
+<h2>Components</h2>
+
+<h3>React Frontend</h3>
+<p>
+  <strong>Stack:</strong> React 18, Vite, TypeScript, Apollo Client, Recharts &nbsp;|&nbsp;
+  <strong>Port:</strong> 5173
+</p>
+<p>
+  The frontend has four pages. <em>Campaign Scorer</em> lets a reviewer paste a campaign title and
+  description, choose between XGBoost-only and ensemble mode, and see the fraud score, label, and
+  top-3 SHAP features in real time. <em>Fraud Queue</em> lists all campaigns above a configurable
+  threshold (0.7–0.8) ranked by score. <em>Model Metrics</em> displays the rolling AUC, PR-AUC,
+  and precision-at-K charts from the monitoring service. <em>Explainability</em> shows per-campaign
+  feature contributions.
+</p>
+<p>
+  All data fetching goes through Apollo Client against the BFF's GraphQL endpoint — the frontend
+  never calls the ML API directly.
+</p>
+
+<h3>GraphQL BFF</h3>
+<p>
+  <strong>Stack:</strong> Node.js 18, Express, Apollo Server 4, TypeScript &nbsp;|&nbsp;
+  <strong>Port:</strong> 4000
+</p>
+<p>
+  The BFF is a thin aggregation layer. Its GraphQL schema exposes four top-level operations:
+</p>
+<ul>
+  <li><code>scoreCampaign(text, modelMode)</code> — mutation; POSTs to FastAPI <code>/predict</code></li>
+  <li><code>fraudQueue(minScore, limit)</code> — query; returns ranked high-risk campaigns</li>
+  <li><code>modelMetrics(window)</code> — query; calls the gRPC Monitoring Service</li>
+  <li><code>driftReport</code> — query; returns the latest Evidently drift report summary</li>
+</ul>
+<p>
+  The BFF also handles CORS, rate limiting, and request authentication so neither the ML API nor
+  the gRPC services need to deal with those concerns.
+</p>
+
+<h3>FastAPI ML API</h3>
+<p>
+  <strong>Stack:</strong> FastAPI, Uvicorn, Pydantic v2, grpcio &nbsp;|&nbsp;
+  <strong>Port:</strong> 8000
+</p>
+<p>
+  The ML API owns inference. On startup it loads the XGBoost model from
+  <code>models/xgb_model.json</code> and the pre-computed SHAP store from
+  <code>models/shap_store.json</code> (7.1 MB). The LoRA adapter is loaded lazily the first time
+  an ensemble prediction is requested, keeping cold-start latency low for XGBoost-only use cases.
+</p>
+<p>Endpoints:</p>
+<ul>
+  <li><code>POST /predict</code> — single prediction</li>
+  <li><code>POST /predict/batch</code> — batch of up to 1 000+ campaigns</li>
+  <li><code>GET /explain/{fund_id}</code> — SHAP top-3 features for a past prediction</li>
+  <li><code>GET /health</code> — model load status, threshold, LoRA-loaded flag</li>
+</ul>
+
+<h3>Feedback Service</h3>
+<p>
+  <strong>Stack:</strong> Python, gRPC, Protobuf, Kafka &nbsp;|&nbsp;
+  <strong>Port:</strong> 50051
+</p>
+<p>
+  Human reviewers submit their verdict (<em>fraud / legitimate</em>, confidence, notes) via the
+  React dashboard. The BFF translates this into a gRPC <code>SubmitLabel</code> call. The Feedback
+  Service writes the label to the Kafka topic <code>fraud-risk.labels</code>. When at least 100
+  new labels have accumulated, retraining is triggered automatically.
+</p>
+
+<h3>Monitoring Service</h3>
+<p>
+  <strong>Stack:</strong> Python, gRPC, Evidently AI, Protobuf &nbsp;|&nbsp;
+  <strong>Port:</strong> 50052
+</p>
+<p>
+  Two gRPC methods: <code>GetDriftReport()</code> returns the latest Evidently feature drift
+  analysis (drifted features, share, p-values), and <code>GetRollingMetrics(window)</code> returns
+  AUC, precision, and recall computed over a sliding time window against ground-truth feedback
+  labels. Alerts fire when feature drift p-values fall below 0.05, or when rolling AUC drops more
+  than 3% from the baseline established at the last training run.
+</p>
+
+<h3>Training Pipeline</h3>
+<p>
+  <strong>Stack:</strong> PySpark 3.5, Ray Train 2.20, Optuna 3.6, HuggingFace Transformers,
+  PEFT, PyTorch 2.3, MLflow 2.13 &nbsp;|&nbsp; Spark UI: 8080
+</p>
+<p>
+  The pipeline is orchestrated via <code>make pipeline</code>:
+</p>
+<ol>
+  <li>Spark ETL reads raw CSV, strips HTML from descriptions, imputes nulls, encodes categoricals,
+      engineers features, and writes Parquet to GCS.</li>
+  <li>XGBoost training runs stratified 5-fold cross-validation via Ray Train, then a final full-data
+      fit. Optuna runs 50 trials to search the hyperparameter space (max_depth, learning_rate,
+      subsample, colsample_bytree).</li>
+  <li>LoRA fine-tuning runs on a GCP Compute Engine instance with a T4 GPU (~$0.54/hr). The PEFT
+      library applies low-rank adapters to the query and value projection layers of Gemma-2B.</li>
+  <li>The evaluation pipeline computes AUC, PR-AUC, F1, precision@100/500, SHAP values, bias slices
+      by category and phone type, then logs everything to MLflow.</li>
+</ol>
+
+<h3>Infrastructure</h3>
+<p>
+  <strong>Local:</strong> Docker Compose brings up Zookeeper + Kafka, Spark master + worker,
+  MLflow (SQLite backend), and all three application services.
+  <strong>Cloud:</strong> Cloud Build YAML configs (<code>cloudbuild-api.yaml</code>,
+  <code>cloudbuild-bff.yaml</code>, <code>cloudbuild-frontend.yaml</code>) containerise and deploy
+  each service independently. LoRA adapters and inference logs are stored in GCS.
+</p>
+
+<table style="border-collapse:collapse;width:100%;font-size:14px;">
+  <thead>
+    <tr style="background:#f0f0f0;">
+      <th style="border:1px solid #ccc;padding:8px 12px;text-align:left;">Component</th>
+      <th style="border:1px solid #ccc;padding:8px 12px;text-align:left;">Key Technology</th>
+      <th style="border:1px solid #ccc;padding:8px 12px;text-align:left;">Port</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="border:1px solid #ccc;padding:8px 12px;">Frontend</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">React 18, Vite, Apollo Client, Recharts</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">5173</td>
+    </tr>
+    <tr style="background:#f9f9f9;">
+      <td style="border:1px solid #ccc;padding:8px 12px;">GraphQL BFF</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">Node.js 18, Express, Apollo Server 4</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">4000</td>
+    </tr>
+    <tr>
+      <td style="border:1px solid #ccc;padding:8px 12px;">ML Serving API</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">FastAPI, Uvicorn, Pydantic v2</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">8000</td>
+    </tr>
+    <tr style="background:#f9f9f9;">
+      <td style="border:1px solid #ccc;padding:8px 12px;">Feedback Service</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">gRPC, Protobuf, Kafka</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">50051</td>
+    </tr>
+    <tr>
+      <td style="border:1px solid #ccc;padding:8px 12px;">Monitoring Service</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">gRPC, Evidently AI, Protobuf</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">50052</td>
+    </tr>
+    <tr style="background:#f9f9f9;">
+      <td style="border:1px solid #ccc;padding:8px 12px;">Kafka</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">Confluent 7.6.1</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">9092</td>
+    </tr>
+    <tr>
+      <td style="border:1px solid #ccc;padding:8px 12px;">Spark</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">PySpark 3.5.1</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">8080 (UI)</td>
+    </tr>
+    <tr style="background:#f9f9f9;">
+      <td style="border:1px solid #ccc;padding:8px 12px;">MLflow</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">MLflow 2.13</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">5001</td>
+    </tr>
+  </tbody>
+</table>
+
+
+<!-- ─── 6. DETAILS ────────────────────────────────────────────────────── -->
+<h2>Details</h2>
+
+<h3>Data Schema and Feature Engineering</h3>
+
+<p>
+  Training data comes from two CSV sources joined on <code>fund_id</code>: a fraud metadata table
+  with account-level signals, and a fund text table with campaign titles and descriptions. The
+  merger produces 8 raw features fed directly to XGBoost, plus 4 engineered features:
+</p>
+
+<table style="border-collapse:collapse;width:100%;font-size:14px;">
+  <thead>
+    <tr style="background:#f0f0f0;">
+      <th style="border:1px solid #ccc;padding:8px 12px;text-align:left;">Feature</th>
+      <th style="border:1px solid #ccc;padding:8px 12px;text-align:left;">Type</th>
+      <th style="border:1px solid #ccc;padding:8px 12px;text-align:left;">Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>category_id</code></td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">float</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">Fundraiser category code</td>
+    </tr>
+    <tr style="background:#f9f9f9;">
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>goal</code></td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">float</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">Funding goal in dollars</td>
+    </tr>
+    <tr>
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>descr_len</code></td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">float</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">Description character length</td>
+    </tr>
+    <tr style="background:#f9f9f9;">
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>title_len</code></td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">float</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">Title character length</td>
+    </tr>
+    <tr>
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>primary_phone_checks__line_type</code></td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">categorical</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">mobile / non-fixed voip / unknown</td>
+    </tr>
+    <tr style="background:#f9f9f9;">
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>identity_check_score</code></td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">float</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">KYC identity verification score (0–500)</td>
+    </tr>
+    <tr>
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>is_disposable_email</code></td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">binary</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">Flag for disposable email addresses</td>
+    </tr>
+    <tr style="background:#f9f9f9;">
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>email_domain_creation_days</code></td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">float</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">Age of the email domain in days</td>
+    </tr>
+    <tr>
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>log_goal</code></td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">engineered</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>log1p(goal)</code> — compresses outlier goals</td>
+    </tr>
+    <tr style="background:#f9f9f9;">
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>email_trust_score</code></td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">engineered</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>domain_age / (is_disposable + 1)</code></td>
+    </tr>
+    <tr>
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>text_ratio</code></td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">engineered</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>descr_len / max(title_len, 1)</code></td>
+    </tr>
+    <tr style="background:#f9f9f9;">
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>identity_norm</code></td>
+      <td style="border:1px solid #ccc;padding:8px 12px;">engineered</td>
+      <td style="border:1px solid #ccc;padding:8px 12px;"><code>identity_check_score / 100</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p>
+  Numeric features are median-imputed. The phone line type is ordinally encoded with
+  <em>unknown</em> mapped to 0.
+</p>
+
+
+<h3>XGBoost Model</h3>
+
+<p>
+  The XGBoost classifier is trained with these default hyperparameters:
+</p>
+
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:16px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>n_estimators     = 400
+max_depth        = 6
+learning_rate    = 0.05
+subsample        = 0.8
+colsample_bytree = 0.8
+eval_metric      = auc</code></pre>
+
+<p>
+  Training uses stratified 5-fold cross-validation via Ray Train for distributed execution. After
+  CV, the model is re-fit on the full training set and serialised as an XGBoost binary JSON file
+  (<code>xgb_model.json</code>, ~2 MB). Optuna runs 50 trials to search the hyperparameter space,
+  with 3-fold CV AUC as the objective; the best parameters are logged to MLflow alongside the model
+  artifact.
+</p>
+
+
+<h3>LoRA Fine-Tuning on Gemma-2B</h3>
+
+<p>
+  The text model is Google's Gemma-2B (2 billion parameters). Fine-tuning uses Low-Rank Adaptation
+  (LoRA) via the PEFT library, which keeps base model weights frozen and trains a small set of
+  rank-decomposition matrices injected into the attention layers:
+</p>
+
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:16px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>lora_r           = 16        # rank of update matrices
+lora_alpha       = 32        # scaling factor
+lora_dropout     = 0.1
+target_modules   = ["q_proj", "v_proj"]
+task_type        = SEQUENCE_CLASSIFICATION (2 classes)
+
+Trainable params: 1.8 M / 2.5 B total  (0.07%)</code></pre>
+
+<p>
+  The training set is 200 balanced samples (50% fraud, 50% legitimate), sourced from a curated
+  CSV. Each sample is formatted as a prompt:
+</p>
+
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:16px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>"Classify the following fundraiser as FRAUD or LEGITIMATE.
+
+Title: {title}
+Description: {description}
+
+Answer (FRAUD or LEGITIMATE):"</code></pre>
+
+<p>
+  Training runs for 10 epochs on a GCP Compute Engine instance with a T4 GPU (approximately
+  $0.54/hr). The HuggingFace <code>Trainer</code> API computes AUC-ROC and F1 at the end of each
+  epoch. Final evaluation on a 40-sample held-out set: <strong>AUC = 0.8525, F1 = 0.7805</strong>.
+  The trained adapter weights are uploaded to GCS at
+  <code>gs://fraud-risk-models/lora-adapters/</code>.
+</p>
+
+
+<h3>Ensemble Fusion Strategy</h3>
+
+<p>
+  Both models output a fraud probability in [0, 1]. These are combined as a weighted average at
+  inference time (late fusion):
+</p>
+
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:16px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>fraud_score = (1 - w_lora) × xgb_score + w_lora × lora_score</code></pre>
+
+<p>
+  The weight <code>w_lora</code> is optimised on the validation set using
+  <code>scipy.optimize.minimize_scalar</code> to maximise AUC, landing at roughly 0.35 (35% LoRA,
+  65% XGBoost). The classification threshold is set at the Youden-J index
+  (maximises sensitivity + specificity − 1), defaulting to 0.5. Both the weight and threshold are
+  configurable via environment variables at deploy time.
+</p>
+
+<p>
+  Clients can also request XGBoost-only inference by passing <code>model_mode: "xgb"</code>,
+  which skips the LoRA adapter entirely and halves latency — useful for high-throughput batch
+  screening.
+</p>
+
+
+<h3>SHAP Explainability</h3>
+
+<p>
+  SHAP (SHapley Additive exPlanations) values are computed once during the evaluation pipeline
+  using XGBoost's <code>TreeExplainer</code> on the full test set (~25 K samples). The results are
+  stored in a 7.1 MB JSON file (<code>shap_store.json</code>) indexed by <code>fund_id</code>,
+  containing the top-3 features by absolute SHAP magnitude with their direction
+  (<em>fraud</em> or <em>safe</em>):
+</p>
+
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:16px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>{
+  "fund_id": 12345,
+  "top_features": [
+    { "name": "goal",               "shap_value": 0.18, "direction": "fraud" },
+    { "name": "email_trust_score",  "shap_value": 0.12, "direction": "fraud" },
+    { "name": "identity_norm",      "shap_value": -0.09, "direction": "safe" }
+  ]
+}</code></pre>
+
+<p>
+  At inference time, the API does an O(1) dictionary lookup — no per-request SHAP computation.
+  This keeps explanation latency negligible even at high throughput.
+</p>
+
+
+<h3>Feedback Loop and Continuous Retraining</h3>
+
+<p>
+  The platform is designed to improve over time without manual intervention. When a reviewer
+  submits a verdict in the dashboard, the BFF calls the gRPC Feedback Service
+  (<code>SubmitLabel</code>), which writes the label to the Kafka topic
+  <code>fraud-risk.labels</code>. A consumer counts new labels; when the count reaches 100, it
+  triggers a retraining run that ingests the new ground truth, re-runs the full training pipeline,
+  evaluates, and updates the model artifacts in GCS.
+</p>
+
+<p>
+  The Feedback Service also exposes <code>ListPendingLabels()</code> as a server-streaming gRPC
+  method, which the retraining orchestrator uses to pull the latest labelled examples.
+</p>
+
+
+<h3>Drift Detection and Alerting</h3>
+
+<p>
+  Production inference requests are logged as JSONL to GCS. The Monitoring Service periodically
+  loads recent logs and runs Evidently's <code>DataDriftPreset</code>, which applies a
+  Kolmogorov-Smirnov test to each feature's production distribution versus its training-time
+  distribution. A feature is considered drifted when the KS test p-value falls below 0.05.
+</p>
+
+<p>Two alert conditions trigger notifications:</p>
+<ul>
+  <li>Any feature's drift p-value drops below 0.05</li>
+  <li>Rolling 7-day AUC (computed from inference logs paired with feedback labels) drops more than
+      3% below the baseline AUC recorded at the last training run</li>
+</ul>
+
+<p>
+  HTML drift reports are saved to <code>gs://fraud-risk-logs/drift-reports/</code> for manual
+  inspection. The BFF surfaces a summary via the <code>driftReport</code> GraphQL query so
+  reviewers can see at a glance whether the model is operating within expected bounds.
+</p>
+
+
+<!-- ─── REFERENCES ────────────────────────────────────────────────────── -->
+<h2>References and Source Code</h2>
+
+<p>
+  The full source code, Dockerfiles, Cloud Build configs, training notebooks, and Makefile are
+  available on GitHub:
+  <a href="https://github.com/PrachiRahurkar/fraud-risk-ml-platform" target="_blank">
+    github.com/PrachiRahurkar/fraud-risk-ml-platform
+  </a>
+</p>
+
+<p>Key files for further reading:</p>
+<ul>
+  <li><code>ml_model_packaging_service/api/predictor.py</code> — EnsemblePredictor class and ensemble fusion logic</li>
+  <li><code>ml_model_packaging_service/api/schemas.py</code> — Pydantic schemas for FundFeatures and PredictionResponse</li>
+  <li><code>ml_model_packaging_service/bff/src/schema/typeDefs.ts</code> — full GraphQL schema</li>
+  <li><code>ml_training_service/training/xgb_trainer.py</code> — XGBoost 5-fold CV training and Optuna HPO</li>
+  <li><code>ml_training_service/training/lora_trainer.py</code> — HuggingFace LoRA fine-tuning</li>
+  <li><code>ml_evaluation_pipeline/explainability.py</code> — SHAP store computation</li>
+  <li><code>ml_observability_monitoring/drift.py</code> — Evidently drift detection</li>
+  <li><code>ml_infra_deployment_ops/docker-compose.yml</code> — full local development stack</li>
+  <li><code>ml_infra_deployment_ops/colab/lora_training.ipynb</code> — interactive Colab training walkthrough</li>
+</ul>
+
+</div>

@@ -62,8 +62,10 @@ services:
     environment:
       XGB_MODEL_PATH: /models/xgb_model.json
       SHAP_STORE_PATH: /models/shap_store.json
+      LORA_ADAPTER_PATH: /models/lora-adapter/final-adapter/v1
+      LORA_MAX_LENGTH: "512"
       FRAUD_THRESHOLD: "0.5"
-      W_LORA: "0.0"
+      W_LORA: "0.35"
     volumes:
       - ../models:/models:ro
     depends_on: [mlflow]
@@ -71,15 +73,27 @@ services:
   # ── Node.js GraphQL BFF ──────────────────────────────────────────────────────
   bff:
     build:
-      context: ../ml_model_packaging_service/bff
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: ml_model_packaging_service/bff/Dockerfile
     ports:
       - "4000:4000"
     environment:
       ML_API_URL: http://ml-api:8000
+      CORS_ORIGIN: http://localhost:5173
       FEEDBACK_SVC_URL: monitoring-svc:50051
       MONITORING_SVC_URL: monitoring-svc:50052
     depends_on: [ml-api]
+
+  # ── React Dashboard ─────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ..
+      dockerfile: ml_model_packaging_service/frontend/Dockerfile
+      args:
+        VITE_GRAPHQL_URL: http://localhost:4000/graphql
+    ports:
+      - "5173:8080"
+    depends_on: [bff]
 
   # ── gRPC Monitoring Service ──────────────────────────────────────────────────
   monitoring-svc:

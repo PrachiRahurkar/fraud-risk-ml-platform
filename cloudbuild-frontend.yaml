@@ -1,0 +1,13 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - ml_model_packaging_service/frontend/Dockerfile
+      - -t
+      - ${_IMAGE}
+      - --build-arg
+      - VITE_GRAPHQL_URL=${_VITE_GRAPHQL_URL}
+      - .
+images:
+  - ${_IMAGE}

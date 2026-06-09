@@ -11,6 +11,8 @@ async def health(request: Request):
         status="ok",
         xgb_model_path=predictor.xgb_model_path,
         lora_adapter_path=predictor.lora_adapter_path,
+        lora_loaded=predictor.lora_loaded,
+        lora_weight=predictor.w_lora,
         threshold=predictor.threshold,
         shap_store_size=predictor.shap_store_size,
     )

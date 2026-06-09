@@ -1,4 +1,9 @@
 export const typeDefs = `#graphql
+  enum ModelMode {
+    XGB
+    ENSEMBLE
+  }
+
   type FeatureContribution {
     name: String!
     shapValue: Float!
@@ -11,6 +16,19 @@ export const typeDefs = `#graphql
     label: Int!
     threshold: Float!
     topFeatures: [FeatureContribution!]!
+  }
+
+  type CampaignScore {
+    fraudScore: Float!
+    label: Int!
+    labelText: String!
+    threshold: Float!
+    modelMode: ModelMode!
+    xgbScore: Float
+    loraScore: Float
+    loraWeight: Float!
+    topFeatures: [FeatureContribution!]!
+    why: String!
   }
 
   type ModelMetrics {
@@ -44,6 +62,7 @@ export const typeDefs = `#graphql
   }
 
   type Mutation {
+    scoreCampaign(campaignText: String!, modelMode: ModelMode!): CampaignScore!
     submitReview(fundId: ID!, isFraud: Boolean!, confidence: Float, notes: String): Boolean!
   }
 `;

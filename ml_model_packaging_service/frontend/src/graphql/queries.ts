@@ -55,6 +55,27 @@ export const GET_EXPLANATION = gql`
   }
 `;
 
+export const SCORE_CAMPAIGN = gql`
+  mutation ScoreCampaign($campaignText: String!, $modelMode: ModelMode!) {
+    scoreCampaign(campaignText: $campaignText, modelMode: $modelMode) {
+      fraudScore
+      label
+      labelText
+      threshold
+      modelMode
+      xgbScore
+      loraScore
+      loraWeight
+      why
+      topFeatures {
+        name
+        shapValue
+        direction
+      }
+    }
+  }
+`;
+
 export const SUBMIT_REVIEW = gql`
   mutation SubmitReview($fundId: ID!, $isFraud: Boolean!, $confidence: Float, $notes: String) {
     submitReview(fundId: $fundId, isFraud: $isFraud, confidence: $confidence, notes: $notes)

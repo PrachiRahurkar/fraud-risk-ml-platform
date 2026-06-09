@@ -1,0 +1,11 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - ml_model_packaging_service/Dockerfile.api
+      - -t
+      - ${_IMAGE}
+      - .
+images:
+  - ${_IMAGE}

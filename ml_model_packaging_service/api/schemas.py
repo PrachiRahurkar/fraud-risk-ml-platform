@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal, Optional
 
 
 class FundFeatures(BaseModel):
@@ -14,6 +14,7 @@ class FundFeatures(BaseModel):
     primary_email_address_checks__email_domain_creation_days: Optional[float] = None
     title: Optional[str] = ""
     description: Optional[str] = ""
+    model_mode: Literal["xgb", "ensemble"] = "ensemble"
 
 
 class FeatureContribution(BaseModel):
@@ -27,6 +28,10 @@ class PredictionResponse(BaseModel):
     fraud_score: float = Field(ge=0.0, le=1.0)
     label: int = Field(ge=0, le=1)
     threshold: float
+    model_mode: Literal["xgb", "ensemble"] = "xgb"
+    xgb_score: Optional[float] = None
+    lora_score: Optional[float] = None
+    lora_weight: float = 0.0
     top_features: list[FeatureContribution]
 
 
@@ -48,5 +53,7 @@ class HealthResponse(BaseModel):
     status: str
     xgb_model_path: str
     lora_adapter_path: Optional[str]
+    lora_loaded: bool
+    lora_weight: float
     threshold: float
     shap_store_size: int

@@ -1,12 +1,14 @@
 FROM node:20-slim
 
-WORKDIR /app
+WORKDIR /app/ml_model_packaging_service/bff
 
-COPY package.json ./
+COPY ml_model_packaging_service/bff/package.json ./
 RUN npm install
 
-COPY src/ ./src/
-COPY ../proto/ ./proto/
+COPY ml_model_packaging_service/bff/tsconfig.json ./
+COPY ml_model_packaging_service/bff/src/ ./src/
+COPY ml_model_packaging_service/proto/ ../proto/
+COPY ml_observability_monitoring/proto/ ../../ml_observability_monitoring/proto/
 
 RUN npm run build
 

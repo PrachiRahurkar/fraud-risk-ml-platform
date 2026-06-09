@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { ApolloClient, InMemoryCache, ApolloProvider } from "@apollo/client";
+import { CampaignScorer } from "./pages/CampaignScorer";
 import { FraudQueue } from "./pages/FraudQueue";
 import { ModelMetrics } from "./pages/ModelMetrics";
 import { Explainability } from "./pages/Explainability";
@@ -9,16 +10,17 @@ const client = new ApolloClient({
   cache: new InMemoryCache(),
 });
 
-type Page = "queue" | "metrics" | "explain";
+type Page = "score" | "queue" | "metrics" | "explain";
 
 const NAV: { key: Page; label: string }[] = [
+  { key: "score", label: "Score Campaign" },
   { key: "queue", label: "Fraud Queue" },
   { key: "metrics", label: "Model Metrics" },
   { key: "explain", label: "Explainability" },
 ];
 
 export default function App() {
-  const [page, setPage] = useState<Page>("queue");
+  const [page, setPage] = useState<Page>("score");
 
   return (
     <ApolloProvider client={client}>
@@ -48,6 +50,7 @@ export default function App() {
         </nav>
 
         <main style={{ padding: "24px 0" }}>
+          {page === "score" && <CampaignScorer />}
           {page === "queue" && <FraudQueue />}
           {page === "metrics" && <ModelMetrics />}
           {page === "explain" && <Explainability />}
